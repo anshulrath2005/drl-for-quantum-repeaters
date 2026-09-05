@@ -23,5 +23,5 @@ model = PPO(
 )
 
 print("Training started... You can monitor progress via TensorBoard.")
-model.learn(total_timesteps=8000000, tb_log_name="PPO_Quantum_Repeater")
+model.learn(total_timesteps=30000000, tb_log_name="PPO_Quantum_Repeater")
 model.save("quantum_repeater_agent")

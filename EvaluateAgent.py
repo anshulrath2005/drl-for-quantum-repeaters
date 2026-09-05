@@ -8,7 +8,7 @@ def PPO_policy(obs):
     action, _ = model.predict(obs, deterministic=True)
     return action
 
-episodes = 50
+episodes = 100
 
 env = QuantumRepeaterEnv(
     n_segments=4,

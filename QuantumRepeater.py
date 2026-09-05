@@ -13,12 +13,13 @@ if "QuantumRepeater-v0" not in registry:
 class QuantumRepeaterEnv(gym.Env):
     metadata = {'render_modes': ['human'], 'render_fps': 1}
     
-    def __init__(self, n_segments=4, tau_c=10.0, p_gen=0.1, render_mode=None, normalized=True):
+    def __init__(self, n_segments=4, tau_c=10.0, p_gen=0.1, p_swap=0.5, render_mode=None, normalized=True):
         super(QuantumRepeaterEnv, self).__init__()
         
         self.n = n_segments
         self.tau_c = tau_c
         self.p_gen = p_gen
+        self.p_swap = p_swap
         self.render_mode = render_mode
         self.normalized = normalized
         self.normalization_factor = self.tau_c * 5
@@ -91,8 +92,9 @@ class QuantumRepeaterEnv(gym.Env):
                     right += 1
                 
                 if left >= 0 and right <= self.n:
-                    new_age = self.state[left][swap_node] + self.state[swap_node][right]
-                    self.state[left][right] = new_age
+                    if self.np_random.random() < self.p_swap:
+                        new_age = self.state[left][swap_node] + self.state[swap_node][right]
+                        self.state[left][right] = new_age
                     self.state[left][swap_node] = -1
                     self.state[swap_node][right] = -1
                     

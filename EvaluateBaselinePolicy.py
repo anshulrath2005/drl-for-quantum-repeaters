@@ -3,7 +3,7 @@ import numpy as np
 from stable_baselines3 import PPO
 from QuantumRepeater import QuantumRepeaterEnv
 
-episodes = 50
+episodes = 100
 
 env = QuantumRepeaterEnv(
     n_segments=4,
