@@ -14,13 +14,14 @@ model = PPO(
     "MlpPolicy",
     env,
     verbose=1,
-    learning_rate=4e-4,     
-    gamma=1.0,              
-    n_steps=8000,           
-    batch_size=250,         
-    policy_kwargs=dict(net_arch=dict(pi=[32, 32], vf=[32, 32])), 
+    learning_rate=4e-4,     # alpha_pi
+    gamma=1.0,              # No discounting
+    n_steps=8000,           # Horizon T
+    batch_size=250,         # Standard optimization batch
+    policy_kwargs=dict(net_arch=dict(pi=[32, 32], vf=[32, 32])), # Network architecture
     tensorboard_log=log_dir
 )
 
+print("Training started... You can monitor progress via TensorBoard.")
 model.learn(total_timesteps=8000000, tb_log_name="PPO_Quantum_Repeater")
 model.save("quantum_repeater_agent")

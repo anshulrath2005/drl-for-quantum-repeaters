@@ -98,23 +98,24 @@ class QuantumRepeaterEnv(gym.Env):
                     
         info = {}
         
-        reward = -0.1  # Small step penalty to encourage faster entanglement
+        reward = 0.0  # Remove step penalty for trajectory-dependent reward
         final_link_age = self.state[0][self.n]
-        if final_link_age >= 0:
-            reward += self.calculate_skr(final_link_age) * 100
-            info['Link Age'] = final_link_age
-            info['SKR'] = self.calculate_skr(final_link_age)
-            info['Time'] = self.current_step - self.last_entanglement_time
-            self.last_entanglement_time = self.current_step
-            self.state[0][self.n] = -1  # Reset final link after reward
-            
-        obs = self.state.copy().astype(np.float32)
-        if self.normalized:
-            obs = np.clip(obs / self.normalization_factor, -1, 1)
         
         truncated = self.current_step >= self.max_steps
         terminated = False
         
+        if final_link_age >= 0:
+            reward = self.calculate_skr(final_link_age) * 100
+            info['Link Age'] = final_link_age
+            info['SKR'] = self.calculate_skr(final_link_age)
+            info['Time'] = self.current_step
+            self.state[0][self.n] = -1  # Reset final link after reward
+            terminated = True # End episode to backpropagate this exact reward to the trajectory
+            
+        obs = self.state.copy().astype(np.float32)
+        if self.normalized:
+            obs = np.clip(obs / self.normalization_factor, -1, 1)
+            
         return obs, reward, terminated, truncated, info
     
     def render(self):
