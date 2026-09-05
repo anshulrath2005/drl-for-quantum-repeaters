@@ -1,0 +1,14 @@
+logs/
+*.zip
+__pycache__/
+*.aux
+*.bbl
+*.blg
+*.fls
+*.log
+*.out
+*.fdb_latexmk
+*.tex
+*.bib
+*.synctex.gz
+*.xdv
