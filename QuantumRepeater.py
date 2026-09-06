@@ -24,26 +24,26 @@ class QuantumRepeaterEnv(gym.Env):
         self.normalized = normalized
         self.normalization_factor = self.tau_c * 5
         
-        # Action Space
-        self.action_space = spaces.MultiBinary(self.n - 1 + int((self.n * (self.n + 1))/2))
+        self.num_pairs = int((self.n * (self.n + 1)) / 2)
         
-        # Observations: State of each node (-1 - no entanglement, age >=0)
-        self.observation_space = spaces.Box(low=-1, high=1e5, shape=(self.n + 1, self.n + 1), dtype=np.float32)
+        # Action Space: (n-1) swaps + discard0 + discard1 + purify
+        self.action_space = spaces.MultiBinary(self.n - 1 + 3 * self.num_pairs)
+        
+        # Observations: 3D matrix (2 slots, n+1, n+1)
+        self.observation_space = spaces.Box(low=-1, high=1e5, shape=(2, self.n + 1, self.n + 1), dtype=np.float32)
         
         # Initialize state
-        self.state = np.full(shape=(self.n + 1, self.n + 1), fill_value=-1, dtype=np.float32)
+        self.state = np.full(shape=(2, self.n + 1, self.n + 1), fill_value=-1, dtype=np.float32)
         
-        self.last_entanglement_time = 0
-        
-        self.max_steps = 100000  # Define a horizon for resets
+        self.max_steps = 100000
         self.current_step = 0
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.state = np.full(shape=(self.n + 1, self.n + 1), fill_value=-1, dtype=np.float32)
+        self.state = np.full(shape=(2, self.n + 1, self.n + 1), fill_value=-1, dtype=np.float32)
         self.current_step = 0
         info = {}
-        if (self.render_mode == 'human'):
+        if self.render_mode == 'human':
             self.render()
         obs = self.state.copy().astype(np.float32)
         if self.normalized:
@@ -51,57 +51,104 @@ class QuantumRepeaterEnv(gym.Env):
         return obs, info
     
     def step(self, action):
-        """Take an action in the environment."""
-        mat_as = np.array(action)[:self.n - 1]
-        mat_ad = np.array(action)[self.n - 1:]
+        action = np.array(action)
+        idx = 0
+        
+        mat_as = action[idx : idx + self.n - 1]
+        idx += self.n - 1
+        mat_ad0 = action[idx : idx + self.num_pairs]
+        idx += self.num_pairs
+        mat_ad1 = action[idx : idx + self.num_pairs]
+        idx += self.num_pairs
+        mat_ap = action[idx : idx + self.num_pairs]
         
         self.current_step += 1
         
-        # Each step, attempt to generate entanglement in the segment where entanglement is absent
+        # 1. Attempt to generate entanglement
         for i in range(self.n):
-            if self.state[i][i+1] == -1:
+            # Attempt slot 0
+            if self.state[0][i][i+1] == -1:
                 if self.np_random.random() < self.p_gen:
-                    self.state[i][i+1] = 0
+                    self.state[0][i][i+1] = 0
+            # Attempt slot 1
+            if self.state[1][i][i+1] == -1:
+                if self.np_random.random() < self.p_gen:
+                    self.state[1][i][i+1] = 0
         
-        # Update ages of existing entanglements
+        # 2. Update ages of existing entanglements
+        for slot in range(2):
+            for i in range(self.n):
+                for j in range(i + 1, self.n + 1):
+                    if self.state[slot][i][j] >= 0:
+                        self.state[slot][i][j] += 1
+                        
+        # 3. Purification Logic
+        pair_idx = 0
         for i in range(self.n):
             for j in range(i + 1, self.n + 1):
-                if self.state[i][j] >= 0:
-                    self.state[i][j] += 1
+                if mat_ap[pair_idx] == 1 and self.state[0][i][j] >= 0 and self.state[1][i][j] >= 0:
+                    t1 = self.state[0][i][j]
+                    t2 = self.state[1][i][j]
                     
-        # Discard entanglements that exceed coherence time
-        index = 0
+                    e1 = 0.5 * (1 - np.exp(-t1 / self.tau_c))
+                    e2 = 0.5 * (1 - np.exp(-t2 / self.tau_c))
+                    p_succ = (1 - e1) * (1 - e2) + e1 * e2
+                    
+                    if self.np_random.random() < p_succ:
+                        if p_succ > 0:
+                            e_new = (e1 * e2) / p_succ
+                        else:
+                            e_new = 0.0
+                        
+                        e_new = min(e_new, 0.499999) # Prevent math domain errors
+                        t_new = -self.tau_c * np.log(1 - 2 * e_new)
+                        
+                        self.state[0][i][j] = t_new
+                        self.state[1][i][j] = -1
+                    else:
+                        self.state[0][i][j] = -1
+                        self.state[1][i][j] = -1
+                pair_idx += 1
+                
+        # 4. Discard Logic
+        pair_idx = 0
         for i in range(self.n):
             for j in range(i + 1, self.n + 1):
-                if mat_ad[index] == 1:
-                    self.state[i][j] = -1  # Discard entanglement
-                index += 1
+                if mat_ad0[pair_idx] == 1:
+                    self.state[0][i][j] = -1
+                if mat_ad1[pair_idx] == 1:
+                    self.state[1][i][j] = -1
+                pair_idx += 1
         
-        # Perform entanglement swapping based on actions
+        # 5. Entanglement Swapping (Strictly Slot 0)
         for swap_node in range(1, self.n):
             if mat_as[swap_node - 1] == 1:
                 left = swap_node - 1
                 right = swap_node + 1
                 
-                # Find nearest left entangled node
-                while left >= 0 and self.state[left][swap_node] == -1:
+                while left >= 0 and self.state[0][left][swap_node] == -1:
                     left -= 1
-                
-                # Find nearest right entangled node
-                while right <= self.n and self.state[swap_node][right] == -1:
+                while right <= self.n and self.state[0][swap_node][right] == -1:
                     right += 1
                 
                 if left >= 0 and right <= self.n:
                     if self.np_random.random() < self.p_swap:
-                        new_age = self.state[left][swap_node] + self.state[swap_node][right]
-                        self.state[left][right] = new_age
-                    self.state[left][swap_node] = -1
-                    self.state[swap_node][right] = -1
+                        new_age = self.state[0][left][swap_node] + self.state[0][swap_node][right]
+                        self.state[0][left][right] = new_age
+                    
+                    self.state[0][left][swap_node] = -1
+                    self.state[0][swap_node][right] = -1
+
+        # 6. Auto-Shift Routine
+        for i in range(self.n):
+            for j in range(i + 1, self.n + 1):
+                if self.state[0][i][j] == -1 and self.state[1][i][j] >= 0:
+                    self.state[0][i][j] = self.state[1][i][j]
+                    self.state[1][i][j] = -1
                     
         info = {}
-        
-        reward = 0.0  # Remove step penalty for trajectory-dependent reward
-        final_link_age = self.state[0][self.n]
+        reward = 0.0
+        final_link_age = self.state[0][0][self.n]
         
         truncated = self.current_step >= self.max_steps
         terminated = False
@@ -111,8 +158,8 @@ class QuantumRepeaterEnv(gym.Env):
             info['Link Age'] = final_link_age
             info['SKR'] = self.calculate_skr(final_link_age)
             info['Time'] = self.current_step
-            self.state[0][self.n] = -1  # Reset final link after reward
-            terminated = True # End episode to backpropagate this exact reward to the trajectory
+            self.state[0][0][self.n] = -1 
+            terminated = True 
             
         obs = self.state.copy().astype(np.float32)
         if self.normalized:
@@ -121,9 +168,10 @@ class QuantumRepeaterEnv(gym.Env):
         return obs, reward, terminated, truncated, info
     
     def render(self):
-        """Render the environment matrix"""
-        print("Current State of the Quantum Repeater:")
-        print(self.state)
+        print("Current State (Slot 0):")
+        print(self.state[0])
+        print("Current State (Slot 1):")
+        print(self.state[1])
         
     def calculate_skr(self, t):
         def h(p):
@@ -133,18 +181,8 @@ class QuantumRepeaterEnv(gym.Env):
         nu = 0.5 * (1 - np.exp(-t / self.tau_c))
         return max(0, 1 - h(nu))
 
-# Test the environment
 if __name__ == "__main__":
     env = gym.make("QuantumRepeater-v0", render_mode='human')
     print("Checking the environment...")
     check_env(env.unwrapped)
     print("Environment check passed.")
-    
-    obs, info = env.reset()
-    
-    for _ in range(10):
-        action = env.action_space.sample()
-        print(f"Action taken: {action[:3]} (swaps), {action[3:]} (discards)")
-        obs, reward, done, truncated, info = env.step(action)
-        env.render()
-        print(f"Reward: {reward}\n")
