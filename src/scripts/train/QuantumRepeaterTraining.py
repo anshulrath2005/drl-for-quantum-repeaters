@@ -3,9 +3,9 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
-from QuantumRepeater import QuantumRepeaterEnv
+from src.envs.QuantumRepeater import QuantumRepeaterEnv
 
-log_dir = "./logs/"
+log_dir = "./logs/logs_single/"
 os.makedirs(log_dir, exist_ok=True)
 
 env = make_vec_env(lambda: Monitor(QuantumRepeaterEnv(n_segments=4, tau_c=10.0), log_dir))
@@ -24,4 +24,4 @@ model = PPO(
 
 print("Training started... You can monitor progress via TensorBoard.")
 model.learn(total_timesteps=30000000, tb_log_name="PPO_Quantum_Repeater")
-model.save("quantum_repeater_agent")
+model.save("models/single_agent/quantum_repeater_agent")

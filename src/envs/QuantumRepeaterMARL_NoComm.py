@@ -3,7 +3,7 @@ from pettingzoo.utils.env import ParallelEnv
 from gymnasium import spaces
 
 class QuantumRepeaterParallelEnv(ParallelEnv):
-    metadata = {'render_modes': ['human'], "name": "quantum_repeater_marl_v0"}
+    metadata = {'render_modes': ['human'], "name": "quantum_repeater_marl_nocomm_v0"}
 
     def __init__(self, n_segments=4, tau_c=10.0, p_gen=0.1, p_swap=0.5, normalized=True):
         super().__init__()
@@ -21,13 +21,15 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
         
         self.num_pairs = int((self.n * (self.n + 1)) / 2)
         
-        # Action space: Every agent outputs a 33-element array, but we will ignore actions outside their jurisdiction
-        self.action_spaces = {agent: spaces.Box(low=0.0, high=1.0, shape=(self.n - 1 + 3 * self.num_pairs,), dtype=np.float32) for agent in self.possible_agents}
+        # Action space: 33 physical actions + 2 communication bits. We use MultiDiscrete to force True/False outputs.
+        self.action_spaces = {agent: spaces.MultiDiscrete([2] * (self.n - 1 + 3 * self.num_pairs + 2)) for agent in self.possible_agents}
         
-        # Observation space: The 3D matrix. It will be heavily masked so agents only see local links.
+        # Observation space: 3D matrix. Layer 0 & 1 are memory slots. Layer 2 is the Communication Plane.
         self.observation_spaces = {agent: spaces.Box(low=-1, high=1e5, shape=(2, self.n + 1, self.n + 1), dtype=np.float32) for agent in self.possible_agents}
         
         self.state = np.full(shape=(2, self.n + 1, self.n + 1), fill_value=-1, dtype=np.float32)
+        # Array to store the classical messages sent on the current turn to be delivered next turn
+                
         self.current_step = 0
         self.max_steps = 100000
 
@@ -45,42 +47,38 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
 
     def _get_obs(self, agent_name):
         """
-        PARTIAL OBSERVABILITY (POMDP):
-        We create a completely blank matrix (-1). We only copy over the real ages for 
-        links that physically touch this specific node. This guarantees the agent is blind 
-        to the rest of the network.
+        PARTIAL OBSERVABILITY (POMDP) with CLASSICAL MESSAGING:
         """
         node_id = int(agent_name.split("_")[1])
         obs = np.full(shape=(2, self.n + 1, self.n + 1), fill_value=-1, dtype=np.float32)
         
+        # 1. Unmask the physical links touching this node
         for slot in range(2):
             for i in range(self.n):
                 for j in range(i + 1, self.n + 1):
-                    # Only reveal the link if it connects to this node's hardware
                     if i == node_id or j == node_id:
                         obs[slot][i][j] = self.state[slot][i][j]
-        
+                        
+        # 2. Normalize the physical ages
         if self.normalized:
-            obs = np.clip(obs / self.normalization_factor, -1, 1)
+            obs[0] = np.clip(obs[0] / self.normalization_factor, -1, 1)
+            obs[1] = np.clip(obs[1] / self.normalization_factor, -1, 1)
+            
         return obs
 
     def step(self, actions):
         self.current_step += 1
         
-        # We start with empty global action arrays
         global_mat_as = np.zeros(self.n - 1, dtype=int)
         global_mat_ad0 = np.zeros(self.num_pairs, dtype=int)
         global_mat_ad1 = np.zeros(self.num_pairs, dtype=int)
         global_mat_ap = np.zeros(self.num_pairs, dtype=int)
         
-        """
-        LOCALIZED ACTIONS:
-        We loop through what each agent requested. However, we STRICTLY filter their requests.
-        Agent 1 is only allowed to swap at Node 1, and purify/discard links touching Node 1.
-        """
+        # Create a fresh message board for this turn
+                
         for agent_name, action in actions.items():
             node_id = int(agent_name.split("_")[1])
-            action = (np.array(action) > 0.5).astype(int)
+            action = np.array(action, dtype=int)
             idx = 0
             
             mat_as = action[idx : idx + self.n - 1]
@@ -90,12 +88,11 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
             mat_ad1 = action[idx : idx + self.num_pairs]
             idx += self.num_pairs
             mat_ap = action[idx : idx + self.num_pairs]
+            idx += self.num_pairs
             
-            # Apply Swap ONLY if it is on this agent's node
             if mat_as[node_id - 1] == 1:
                 global_mat_as[node_id - 1] = 1
             
-            # Apply Purify/Discard ONLY if it is on links physically connected to this node
             pair_idx = 0
             for i in range(self.n):
                 for j in range(i + 1, self.n + 1):
@@ -106,25 +103,21 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
                     pair_idx += 1
 
         # =========================================================================
-        # THE REST IS THE EXACT SAME PHYSICS ENGINE AS THE CENTRALIZED VERSION
-        # We process the filtered `global_mat` arrays exactly as we did before.
+        # THE PHYSICS ENGINE
         # =========================================================================
         
-        # 1. Attempt to generate entanglement
         for i in range(self.n):
             if self.state[0][i][i+1] == -1:
                 if np.random.random() < self.p_gen: self.state[0][i][i+1] = 0
             if self.state[1][i][i+1] == -1:
                 if np.random.random() < self.p_gen: self.state[1][i][i+1] = 0
         
-        # 2. Update ages of existing entanglements
         for slot in range(2):
             for i in range(self.n):
                 for j in range(i + 1, self.n + 1):
                     if self.state[slot][i][j] >= 0:
                         self.state[slot][i][j] += 1
                         
-        # 3. Purification Logic
         pair_idx = 0
         for i in range(self.n):
             for j in range(i + 1, self.n + 1):
@@ -143,7 +136,6 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
                         self.state[1][i][j] = -1
                 pair_idx += 1
                 
-        # 4. Discard Logic
         pair_idx = 0
         for i in range(self.n):
             for j in range(i + 1, self.n + 1):
@@ -151,7 +143,11 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
                 if global_mat_ad1[pair_idx] == 1: self.state[1][i][j] = -1
                 pair_idx += 1
         
-        # 5. Entanglement Swapping (Strictly Slot 0)
+        # =========================================================================
+        # REWARD BROADCAST & BREADCRUMBS
+        # =========================================================================
+        reward = 0.0
+        
         for swap_node in range(1, self.n):
             if global_mat_as[swap_node - 1] == 1:
                 left = swap_node - 1
@@ -162,21 +158,23 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
                 
                 if left >= 0 and right <= self.n:
                     if np.random.random() < self.p_swap:
+                        # BREADCRUMB FIX: Only reward +0.1 if the agent is NOT overwriting an existing link!
+                        # This stops the infinite money glitch of repeatedly destroying/overwriting links.
+                        if self.state[0][left][right] == -1:
+                            reward += 0.1
+                            
                         self.state[0][left][right] = self.state[0][left][swap_node] + self.state[0][swap_node][right]
+                        
                     self.state[0][left][swap_node] = -1
                     self.state[0][swap_node][right] = -1
 
-        # 6. Auto-Shift Routine
         for i in range(self.n):
             for j in range(i + 1, self.n + 1):
                 if self.state[0][i][j] == -1 and self.state[1][i][j] >= 0:
                     self.state[0][i][j] = self.state[1][i][j]
                     self.state[1][i][j] = -1
                     
-        # =========================================================================
-        # THE SHARED REWARD BROADCAST
-        # =========================================================================
-        reward = 0.0
+        # (Message board removed)
         final_link_age = self.state[0][0][self.n]
         truncated = self.current_step >= self.max_steps
         terminated = False
@@ -184,23 +182,18 @@ class QuantumRepeaterParallelEnv(ParallelEnv):
         if final_link_age >= 0:
             base_skr = self.calculate_skr(final_link_age)
             
-            # REWARD SHAPING: Massive bonus for high-fidelity (young) links
-            if final_link_age <= 6.0:
-                reward = base_skr * 500
-            else:
-                reward = base_skr * 10
+            # REWARD SHAPING: Smooth exponential curve to prevent zero-gradient cliffs
+            reward += base_skr * (100.0 + 400.0 * np.exp(-final_link_age / 3.0))
                 
             self.state[0][0][self.n] = -1 
             terminated = True 
             
-        # We broadcast the exact same reward, terminated, and truncated signals to ALL agents
         rewards = {agent: reward for agent in self.agents}
         terminations = {agent: terminated for agent in self.agents}
         truncations = {agent: truncated for agent in self.agents}
         infos = {agent: {'Link Age': final_link_age} if terminated else {} for agent in self.agents}
         observations = {agent: self._get_obs(agent) for agent in self.agents}
         
-        # PettingZoo standard: When the environment finishes, the agent list must be emptied
         if terminated or truncated:
             self.agents = [] 
             

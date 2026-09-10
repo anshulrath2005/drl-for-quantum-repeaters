@@ -1,14 +1,19 @@
-from MemoryCutoffPolicy import baseline_policy
 import numpy as np
 from stable_baselines3 import PPO
-from QuantumRepeater import QuantumRepeaterEnv
+from src.envs.QuantumRepeater import QuantumRepeaterEnv
+
+model = PPO.load("models/single_agent/quantum_repeater_agent")
+
+def PPO_policy(obs):
+    action, _ = model.predict(obs, deterministic=True)
+    return action
 
 episodes = 100
 
 env = QuantumRepeaterEnv(
     n_segments=4,
     tau_c=10.0,
-    normalized=False
+    normalized=True
 )
 
 episode_rewards = []
@@ -23,7 +28,7 @@ for seed in range(episodes):
     steps = 0
 
     while steps < env.max_steps:
-        action = baseline_policy(obs)
+        action = PPO_policy(obs)
         obs, reward, done, truncated, info = env.step(action)
         total_reward += reward
         steps += 1
@@ -39,7 +44,7 @@ for seed in range(episodes):
     success_counts.append(successes)
 
 print()
-print("Memory-Cutoff Baseline")
+print("PPO Agent")
 print(f"Mean reward per 10^5 steps: {np.mean(episode_rewards):.2f} ± {np.std(episode_rewards):.2f}")
 print(f"Mean successes per 10^5 steps: {np.mean(success_counts):.2f}")
 if link_ages:

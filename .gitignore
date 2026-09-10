@@ -1,5 +1,4 @@
 logs/
-logs_marl/
 __pycache__/
 *.aux
 *.bbl
@@ -12,3 +11,6 @@ __pycache__/
 *.bib
 *.synctex.gz
 *.xdv
+execution/
+.envrc
+.execution-helpers
