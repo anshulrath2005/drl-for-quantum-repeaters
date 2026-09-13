@@ -90,19 +90,19 @@ def evaluate(model_path, p_swap_val, json_filename, episodes=30, num_cores=6):
 
 if __name__ == "__main__":
     print("\n========================================================")
-    print("TEST 1: The 'Kindergarten' Agent in a Perfect Environment")
+    print("TEST 1: The 'Base' Agent in a Perfect Environment")
     print("Testing if it learned to use communication perfectly when hardware is 100% reliable.")
     print("========================================================")
     evaluate("models/marl_nocomm_agent/phase1/nocomm_agent_phase1", 1.0, "data/nocomm_test1_ages.json")
     
     print("========================================================")
-    print("TEST 2: The 'Kindergarten' Agent in the Noisy Real World")
+    print("TEST 2: The 'Base' Agent in the Imperfect Environment")
     print("Testing if an AI trained in a perfect simulation breaks when faced with 50% swap failures.")
     print("========================================================")
     evaluate("models/marl_nocomm_agent/phase1/nocomm_agent_phase1", 0.5, "data/nocomm_test2_ages.json")
 
     print("========================================================")
-    print("TEST 3: The Curriculum Master Agent in the Noisy Real World")
+    print("TEST 3: The Curriculum Agent in the Imperfect Environment")
     print("Testing the final agent that was forced to adapt to the 50% swap failures.")
     print("========================================================")
     evaluate("models/marl_nocomm_agent/phase2/nocomm_agent", 0.5, "data/nocomm_test3_ages.json")

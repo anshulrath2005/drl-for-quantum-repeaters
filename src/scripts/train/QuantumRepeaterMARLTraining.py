@@ -17,7 +17,7 @@ if __name__ == "__main__":
     os.makedirs(log_dir, exist_ok=True)
 
     print("======================================================")
-    print(f"PHASE 1: KINDERGARTEN (p_swap = 1.0)")
+    print(f"PHASE 1: Base (p_swap = 1.0)")
     print(f"Running on {NUM_CORES} CPU Cores!")
     print("======================================================")
 
